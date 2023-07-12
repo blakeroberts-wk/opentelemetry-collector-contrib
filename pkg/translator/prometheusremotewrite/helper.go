@@ -44,6 +44,9 @@ const (
 	spanIDKey        = "span_id"
 	infoType         = "info"
 	targetMetricName = "target_info"
+	scopeMetricName  = "otel_scope_info"
+	scopeAttrName    = "otel_scope_name"
+	scopeAttrVersion = "otel_scope_version"
 )
 
 type bucketBoundsData struct {
@@ -155,7 +158,13 @@ func timeSeriesSignature(datatype string, labels *[]prompb.Label) string {
 // createAttributes creates a slice of Cortex Label with OTLP attributes and pairs of string values.
 // Unpaired string value is ignored. String pairs overwrites OTLP labels if collision happens, and the overwrite is
 // logged. Resultant label names are sanitized.
-func createAttributes(resource pcommon.Resource, attributes pcommon.Map, externalLabels map[string]string, extras ...string) []prompb.Label {
+func createAttributes(
+	resource pcommon.Resource,
+	scope pcommon.InstrumentationScope,
+	attributes pcommon.Map,
+	externalLabels map[string]string,
+	extras ...string,
+) []prompb.Label {
 	serviceName, haveServiceName := resource.Attributes().Get(conventions.AttributeServiceName)
 	instance, haveInstanceID := resource.Attributes().Get(conventions.AttributeServiceInstanceID)
 
@@ -212,6 +221,14 @@ func createAttributes(resource pcommon.Resource, attributes pcommon.Map, externa
 		l[key] = value
 	}
 
+	// add scope name/version labels
+	if len(scope.Name()) > 0 {
+		extras = append(extras, scopeAttrName, scope.Name())
+	}
+	if len(scope.Version()) > 0 {
+		extras = append(extras, scopeAttrVersion, scope.Version())
+	}
+
 	for i := 0; i < len(extras); i += 2 {
 		if i+1 >= len(extras) {
 			break
@@ -255,11 +272,18 @@ func isValidAggregationTemporality(metric pmetric.Metric) bool {
 
 // addSingleHistogramDataPoint converts pt to 2 + min(len(ExplicitBounds), len(BucketCount)) + 1 samples. It
 // ignore extra buckets if len(ExplicitBounds) > len(BucketCounts)
-func addSingleHistogramDataPoint(pt pmetric.HistogramDataPoint, resource pcommon.Resource, metric pmetric.Metric, settings Settings, tsMap map[string]*prompb.TimeSeries) {
+func addSingleHistogramDataPoint(
+	pt pmetric.HistogramDataPoint,
+	resource pcommon.Resource,
+	scope pcommon.InstrumentationScope,
+	metric pmetric.Metric,
+	settings Settings,
+	tsMap map[string]*prompb.TimeSeries,
+) {
 	timestamp := convertTimeStamp(pt.Timestamp())
 	// sum, count, and buckets of the histogram should append suffix to baseName
 	baseName := prometheustranslator.BuildCompliantName(metric, settings.Namespace, settings.AddMetricSuffixes)
-	baseLabels := createAttributes(resource, pt.Attributes(), settings.ExternalLabels)
+	baseLabels := createAttributes(resource, scope, pt.Attributes(), settings.ExternalLabels)
 
 	createLabels := func(nameSuffix string, extras ...string) []prompb.Label {
 		extraLabelCount := len(extras) / 2
@@ -454,12 +478,18 @@ func maxTimestamp(a, b pcommon.Timestamp) pcommon.Timestamp {
 }
 
 // addSingleSummaryDataPoint converts pt to len(QuantileValues) + 2 samples.
-func addSingleSummaryDataPoint(pt pmetric.SummaryDataPoint, resource pcommon.Resource, metric pmetric.Metric, settings Settings,
-	tsMap map[string]*prompb.TimeSeries) {
+func addSingleSummaryDataPoint(
+	pt pmetric.SummaryDataPoint,
+	resource pcommon.Resource,
+	scope pcommon.InstrumentationScope,
+	metric pmetric.Metric,
+	settings Settings,
+	tsMap map[string]*prompb.TimeSeries,
+) {
 	timestamp := convertTimeStamp(pt.Timestamp())
 	// sum and count of the summary should append suffix to baseName
 	baseName := prometheustranslator.BuildCompliantName(metric, settings.Namespace, settings.AddMetricSuffixes)
-	baseLabels := createAttributes(resource, pt.Attributes(), settings.ExternalLabels)
+	baseLabels := createAttributes(resource, scope, pt.Attributes(), settings.ExternalLabels)
 
 	createLabels := func(name string, extras ...string) []prompb.Label {
 		extraLabelCount := len(extras) / 2
@@ -570,10 +600,48 @@ func addResourceTargetInfo(resource pcommon.Resource, settings Settings, timesta
 	if len(settings.Namespace) > 0 {
 		name = settings.Namespace + "_" + name
 	}
-	labels := createAttributes(resource, attributes, settings.ExternalLabels, nameStr, name)
+	labels := createAttributes(resource, pcommon.NewInstrumentationScope(), attributes, settings.ExternalLabels, nameStr, name)
 	sample := &prompb.Sample{
 		Value: float64(1),
 		// convert ns to ms
+		Timestamp: convertTimeStamp(timestamp),
+	}
+	addSample(tsMap, sample, labels, infoType)
+}
+
+func addScopeTargetInfo(
+	scope pcommon.InstrumentationScope,
+	resource pcommon.Resource,
+	settings Settings,
+	timestamp pcommon.Timestamp,
+	tsMap map[string]*prompb.TimeSeries,
+) {
+	if settings.DisableScopeInfo {
+		return
+	}
+	if scope.Attributes().Len() == 0 {
+		// If the scope doesn't have additional attributes, then otel_scope_info isn't useful.
+		return
+	}
+
+	// Only add service name and instance id resource attributes
+	resCopy := pcommon.NewResource()
+	serviceName, ok := resource.Attributes().Get(conventions.AttributeServiceName)
+	if ok {
+		serviceName.CopyTo(resCopy.Attributes().PutEmpty(conventions.AttributeServiceName))
+	}
+	serviceInstanceId, ok := resource.Attributes().Get(conventions.AttributeServiceInstanceID)
+	if ok {
+		serviceInstanceId.CopyTo(resCopy.Attributes().PutEmpty(conventions.AttributeServiceInstanceID))
+	}
+
+	name := scopeMetricName
+	if len(settings.Namespace) > 0 {
+		name = settings.Namespace + "_" + name
+	}
+	labels := createAttributes(resource, scope, scope.Attributes(), settings.ExternalLabels, nameStr, name)
+	sample := &prompb.Sample{
+		Value:     float64(1),
 		Timestamp: convertTimeStamp(timestamp),
 	}
 	addSample(tsMap, sample, labels, infoType)
