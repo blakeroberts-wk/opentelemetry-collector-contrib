@@ -96,7 +96,7 @@ func createDefaultConfig() component.Config {
 			Enabled: true,
 		},
 		ScopeInfo: &ScopeInfo{
-			Enabled: true,
+			Enabled: false,
 		},
 		CreatedMetric: &CreatedMetric{
 			Enabled: false,
