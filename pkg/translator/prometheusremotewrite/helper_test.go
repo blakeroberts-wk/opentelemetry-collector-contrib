@@ -711,7 +711,7 @@ func TestAddResourceTargetInfo(t *testing.T) {
 	}
 }
 
-func TestAddScopeTargetInfo(t *testing.T) {
+func TestAddScopeInfo(t *testing.T) {
 	for _, tc := range []struct {
 		desc      string
 		resource  pcommon.Resource
@@ -734,7 +734,22 @@ func TestAddScopeTargetInfo(t *testing.T) {
 			pcommon.NewInstrumentationScope(),
 			Settings{},
 			testdata.TestMetricStartTimestamp,
-			map[string]*prompb.TimeSeries{},
+			map[string]*prompb.TimeSeries{
+				"info-__name__-otel_scope_info": {
+					Labels: []prompb.Label{
+						{
+							Name:  "__name__",
+							Value: "otel_scope_info",
+						},
+					},
+					Samples: []prompb.Sample{
+						{
+							Value:     1,
+							Timestamp: 1581452772000,
+						},
+					},
+				},
+			},
 		},
 		{
 			"with scope attributes",
@@ -815,7 +830,7 @@ func TestAddScopeTargetInfo(t *testing.T) {
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
 			tsMap := map[string]*prompb.TimeSeries{}
-			addScopeTargetInfo(tc.scope, tc.resource, tc.settings, tc.timestamp, tsMap)
+			addScopeInfo(tc.resource, tc.scope, tc.settings, tc.timestamp, tsMap)
 			assert.Exactly(t, tc.expected, tsMap)
 		})
 	}
