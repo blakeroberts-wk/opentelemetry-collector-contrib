@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package dynatraceexporter
 
@@ -32,6 +21,7 @@ import (
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
@@ -169,7 +159,7 @@ func Test_exporter_PushMetricsData(t *testing.T) {
 	}
 
 	t.Run(test.name, func(t *testing.T) {
-		e := &exporter{
+		e := &metricsExporter{
 			settings: test.fields.settings,
 			cfg:      test.fields.cfg,
 			client:   test.fields.client,
@@ -315,7 +305,7 @@ func Test_SumMetrics(t *testing.T) {
 			prevPts := ttlmap.New(cSweepIntervalSeconds, cMaxAgeSeconds)
 
 			// set up the exporter
-			exp := &exporter{
+			exp := &metricsExporter{
 				settings: componenttest.NewNopTelemetrySettings(),
 				cfg: &config.Config{
 					APIToken:           "token",
@@ -378,7 +368,7 @@ func Test_exporter_PushMetricsData_EmptyPayload(t *testing.T) {
 	noneMetric := metrics.AppendEmpty()
 	noneMetric.SetName("none")
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -415,7 +405,7 @@ func Test_exporter_PushMetricsData_isDisabled(t *testing.T) {
 	intGaugeDataPoint.SetIntValue(10)
 	intGaugeDataPoint.SetTimestamp(testTimestamp)
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -441,7 +431,7 @@ func Test_exporter_send_BadRequest(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -466,7 +456,7 @@ func Test_exporter_send_Unauthorized(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -491,7 +481,7 @@ func Test_exporter_send_TooLarge(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -516,7 +506,7 @@ func Test_exporter_send_NotFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			APIToken:           "token",
@@ -537,6 +527,53 @@ func Test_exporter_send_NotFound(t *testing.T) {
 	}
 }
 
+func Test_exporter_send_TooManyRequests(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte{})
+	}))
+	defer ts.Close()
+
+	e := &metricsExporter{
+		settings: componenttest.NewNopTelemetrySettings(),
+		cfg: &config.Config{
+			APIToken:           "token",
+			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
+			Prefix:             "prefix",
+			DefaultDimensions:  map[string]string{},
+		},
+		client: ts.Client(),
+	}
+	err := e.send(context.Background(), []string{""})
+
+	assert.True(t, consumererror.IsPermanent(err), "Expected error to be permanent %v", err)
+	assert.False(t, e.isDisabled, "Expected exporter to not be disabled")
+}
+
+func Test_exporter_send_MiscellaneousErrorCode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusExpectationFailed)
+		_, _ = w.Write([]byte{})
+	}))
+	defer ts.Close()
+
+	e := &metricsExporter{
+		settings: componenttest.NewNopTelemetrySettings(),
+		cfg: &config.Config{
+			APIToken:           "token",
+			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
+			Prefix:             "prefix",
+			DefaultDimensions:  map[string]string{},
+		},
+		client: ts.Client(),
+	}
+	err := e.send(context.Background(), []string{""})
+
+	assert.ErrorContains(t, err, "417 Expectation Failed")
+	assert.True(t, consumererror.IsPermanent(err), "Expected error to be permanent %v", err)
+	assert.False(t, e.isDisabled, "Expected exporter to not be disabled")
+}
+
 func Test_exporter_send_chunking(t *testing.T) {
 	sentChunks := 0
 
@@ -551,7 +588,7 @@ func Test_exporter_send_chunking(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	e := &exporter{
+	e := &metricsExporter{
 		settings: componenttest.NewNopTelemetrySettings(),
 		cfg: &config.Config{
 			HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ts.URL},
@@ -635,7 +672,7 @@ func Test_exporter_PushMetricsData_Error(t *testing.T) {
 	}
 
 	t.Run(test.name, func(t *testing.T) {
-		e := &exporter{
+		e := &metricsExporter{
 			settings: componenttest.NewNopTelemetrySettings(),
 			cfg:      test.fields.cfg,
 			client:   test.fields.client,
@@ -660,7 +697,7 @@ func Test_exporter_start_InvalidHTTPClientSettings(t *testing.T) {
 		},
 	}
 
-	exp := newMetricsExporter(componenttest.NewNopExporterCreateSettings(), cfg)
+	exp := newMetricsExporter(exportertest.NewNopCreateSettings(), cfg)
 
 	err := exp.start(context.Background(), componenttest.NewNopHost())
 	if err == nil {
@@ -674,7 +711,7 @@ func Test_exporter_new_with_tags(t *testing.T) {
 		DefaultDimensions: map[string]string{"test_tag": "value"},
 	}
 
-	exp := newMetricsExporter(componenttest.NewNopExporterCreateSettings(), cfg)
+	exp := newMetricsExporter(exportertest.NewNopCreateSettings(), cfg)
 
 	assert.Equal(t, dimensions.NewNormalizedDimensionList(dimensions.NewDimension("test_tag", "value")), exp.defaultDimensions)
 }
@@ -684,7 +721,7 @@ func Test_exporter_new_with_default_dimensions(t *testing.T) {
 		DefaultDimensions: map[string]string{"test_dimension": "value"},
 	}
 
-	exp := newMetricsExporter(componenttest.NewNopExporterCreateSettings(), cfg)
+	exp := newMetricsExporter(exportertest.NewNopCreateSettings(), cfg)
 
 	assert.Equal(t, dimensions.NewNormalizedDimensionList(dimensions.NewDimension("test_dimension", "value")), exp.defaultDimensions)
 }
@@ -695,7 +732,7 @@ func Test_exporter_new_with_default_dimensions_override_tag(t *testing.T) {
 		DefaultDimensions: map[string]string{"from": "default_dimensions"},
 	}
 
-	exp := newMetricsExporter(componenttest.NewNopExporterCreateSettings(), cfg)
+	exp := newMetricsExporter(exportertest.NewNopCreateSettings(), cfg)
 
 	assert.Equal(t, dimensions.NewNormalizedDimensionList(dimensions.NewDimension("from", "default_dimensions")), exp.defaultDimensions)
 }
@@ -723,7 +760,7 @@ func Test_LineTooLong(t *testing.T) {
 	intGaugeDataPoint := intGaugeDataPoints.AppendEmpty()
 	intGaugeDataPoint.SetIntValue(10)
 	intGaugeDataPoint.SetTimestamp(testTimestamp)
-	exp := newMetricsExporter(componenttest.NewNopExporterCreateSettings(), &config.Config{DefaultDimensions: dims})
+	exp := newMetricsExporter(exportertest.NewNopCreateSettings(), &config.Config{DefaultDimensions: dims})
 
 	assert.Empty(t, exp.serializeMetrics(md))
 }

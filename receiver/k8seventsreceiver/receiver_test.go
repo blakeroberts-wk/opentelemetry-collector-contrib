@@ -1,16 +1,5 @@
-// Copyright  OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package k8seventsreceiver
 
@@ -23,20 +12,25 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig"
 )
 
 func TestNewReceiver(t *testing.T) {
 	rCfg := createDefaultConfig().(*Config)
-	client := fake.NewSimpleClientset()
+	rCfg.makeClient = func(apiConf k8sconfig.APIConfig) (k8s.Interface, error) {
+		return fake.NewSimpleClientset(), nil
+	}
 	r, err := newReceiver(
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		rCfg,
 		consumertest.NewNop(),
-		client,
 	)
 
 	require.NoError(t, err)
@@ -46,10 +40,9 @@ func TestNewReceiver(t *testing.T) {
 
 	rCfg.Namespaces = []string{"test", "another_test"}
 	r1, err := newReceiver(
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		rCfg,
 		consumertest.NewNop(),
-		client,
 	)
 
 	require.NoError(t, err)
@@ -60,13 +53,11 @@ func TestNewReceiver(t *testing.T) {
 
 func TestHandleEvent(t *testing.T) {
 	rCfg := createDefaultConfig().(*Config)
-	client := fake.NewSimpleClientset()
 	sink := new(consumertest.LogsSink)
 	r, err := newReceiver(
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		rCfg,
 		sink,
-		client,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, r)
@@ -80,13 +71,11 @@ func TestHandleEvent(t *testing.T) {
 
 func TestDropEventsOlderThanStartupTime(t *testing.T) {
 	rCfg := createDefaultConfig().(*Config)
-	client := fake.NewSimpleClientset()
 	sink := new(consumertest.LogsSink)
 	r, err := newReceiver(
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		rCfg,
 		sink,
-		client,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, r)
@@ -118,12 +107,10 @@ func TestGetEventTimestamp(t *testing.T) {
 
 func TestAllowEvent(t *testing.T) {
 	rCfg := createDefaultConfig().(*Config)
-	client := fake.NewSimpleClientset()
 	r, err := newReceiver(
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		rCfg,
 		consumertest.NewNop(),
-		client,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, r)

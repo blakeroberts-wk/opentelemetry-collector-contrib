@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package regex // import "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/parser/regex"
 
@@ -111,7 +100,7 @@ func (r *Parser) Process(ctx context.Context, entry *entry.Entry) error {
 }
 
 // parse will parse a value using the supplied regex.
-func (r *Parser) parse(value interface{}) (interface{}, error) {
+func (r *Parser) parse(value any) (any, error) {
 	var raw string
 	switch m := value.(type) {
 	case string:
@@ -122,7 +111,7 @@ func (r *Parser) parse(value interface{}) (interface{}, error) {
 	return r.match(raw)
 }
 
-func (r *Parser) match(value string) (interface{}, error) {
+func (r *Parser) match(value string) (any, error) {
 	if r.cache != nil {
 		if x := r.cache.get(value); x != nil {
 			return x, nil
@@ -134,7 +123,7 @@ func (r *Parser) match(value string) (interface{}, error) {
 		return nil, fmt.Errorf("regex pattern does not match")
 	}
 
-	parsedValues := map[string]interface{}{}
+	parsedValues := map[string]any{}
 	for i, subexp := range r.regexp.SubexpNames() {
 		if i == 0 {
 			// Skip whole match

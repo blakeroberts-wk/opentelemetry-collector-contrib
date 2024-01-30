@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package oidcauthextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/oidcauthextension"
 
@@ -90,7 +79,8 @@ func (e *oidcExtension) start(context.Context, component.Host) error {
 
 // authenticate checks whether the given context contains valid auth data. Successfully authenticated calls will always return a nil error and a context with the auth data.
 func (e *oidcExtension) authenticate(ctx context.Context, headers map[string][]string) (context.Context, error) {
-	authHeaders := headers[e.cfg.Attribute]
+	metadata := client.NewMetadata(headers)
+	authHeaders := metadata.Get(e.cfg.Attribute)
 	if len(authHeaders) == 0 {
 		return ctx, errNotAuthenticated
 	}
@@ -107,7 +97,7 @@ func (e *oidcExtension) authenticate(ctx context.Context, headers map[string][]s
 		return ctx, fmt.Errorf("failed to verify token: %w", err)
 	}
 
-	claims := map[string]interface{}{}
+	claims := map[string]any{}
 	if err = idToken.Claims(&claims); err != nil {
 		// currently, this isn't a valid condition, the Verify call a few lines above
 		// will already attempt to parse the payload as a json and set it as the claims
@@ -136,7 +126,7 @@ func (e *oidcExtension) authenticate(ctx context.Context, headers map[string][]s
 	return client.NewContext(ctx, cl), nil
 }
 
-func getSubjectFromClaims(claims map[string]interface{}, usernameClaim string, fallback string) (string, error) {
+func getSubjectFromClaims(claims map[string]any, usernameClaim string, fallback string) (string, error) {
 	if len(usernameClaim) > 0 {
 		username, found := claims[usernameClaim]
 		if !found {
@@ -154,7 +144,7 @@ func getSubjectFromClaims(claims map[string]interface{}, usernameClaim string, f
 	return fallback, nil
 }
 
-func getGroupsFromClaims(claims map[string]interface{}, groupsClaim string) ([]string, error) {
+func getGroupsFromClaims(claims map[string]any, groupsClaim string) ([]string, error) {
 	if len(groupsClaim) > 0 {
 		var groups []string
 		rawGroup, ok := claims[groupsClaim]
@@ -166,7 +156,7 @@ func getGroupsFromClaims(claims map[string]interface{}, groupsClaim string) ([]s
 			groups = append(groups, v)
 		case []string:
 			groups = v
-		case []interface{}:
+		case []any:
 			groups = make([]string, 0, len(v))
 			for i := range v {
 				groups = append(groups, fmt.Sprintf("%v", v[i]))

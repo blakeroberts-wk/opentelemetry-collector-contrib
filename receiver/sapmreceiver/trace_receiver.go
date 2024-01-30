@@ -1,16 +1,5 @@
-// Copyright 2019, OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package sapmreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sapmreceiver"
 
@@ -29,14 +18,15 @@ import (
 	"github.com/signalfx/sapm-proto/sapmprotocol"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/obsreport"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger"
 )
 
 var gzipWriterPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return gzip.NewWriter(io.Discard)
 	},
 }
@@ -56,7 +46,7 @@ type sapmReceiver struct {
 	// for every request. At some point this may be removed when there is actual content to return.
 	defaultResponse []byte
 
-	obsrecv *obsreport.Receiver
+	obsrecv *receiverhelper.ObsReport
 }
 
 // handleRequest parses an http request containing sapm and passes the trace data to the next consumer
@@ -194,20 +184,23 @@ func (sr *sapmReceiver) Start(_ context.Context, host component.Host) error {
 
 // Shutdown stops the the sapmReceiver's server.
 func (sr *sapmReceiver) Shutdown(context.Context) error {
+	if sr.server == nil {
+		return nil
+	}
 	err := sr.server.Close()
 	sr.shutdownWG.Wait()
 	return err
 }
 
-// this validates at compile time that sapmReceiver implements the component.TracesReceiver interface
-var _ component.TracesReceiver = (*sapmReceiver)(nil)
+// this validates at compile time that sapmReceiver implements the receiver.Traces interface
+var _ receiver.Traces = (*sapmReceiver)(nil)
 
 // newReceiver creates a sapmReceiver that receives SAPM over http
 func newReceiver(
-	params component.ReceiverCreateSettings,
+	params receiver.CreateSettings,
 	config *Config,
 	nextConsumer consumer.Traces,
-) (component.TracesReceiver, error) {
+) (receiver.Traces, error) {
 	// build the response message
 	defaultResponse := &splunksapm.PostSpansResponse{}
 	defaultResponseBytes, err := defaultResponse.Marshal()
@@ -218,7 +211,7 @@ func newReceiver(
 	if config.TLSSetting != nil {
 		transport = "https"
 	}
-	obsrecv, err := obsreport.NewReceiver(obsreport.ReceiverSettings{
+	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             params.ID,
 		Transport:              transport,
 		ReceiverCreateSettings: params,

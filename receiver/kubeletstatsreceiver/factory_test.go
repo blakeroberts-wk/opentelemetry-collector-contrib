@@ -1,16 +1,5 @@
-// Copyright 2020, OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 //go:build !windows
 // +build !windows
@@ -31,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.opentelemetry.io/collector/receiver/scraperhelper"
 	"go.uber.org/zap"
 
@@ -55,7 +45,7 @@ func TestCreateTracesReceiver(t *testing.T) {
 	factory := NewFactory()
 	traceReceiver, err := factory.CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		factory.CreateDefaultConfig(),
 		nil,
 	)
@@ -67,7 +57,7 @@ func TestCreateMetricsReceiver(t *testing.T) {
 	factory := NewFactory()
 	metricsReceiver, err := factory.CreateMetricsReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		tlsConfig(),
 		consumertest.NewNop(),
 	)
@@ -82,7 +72,7 @@ func TestFactoryInvalidExtraMetadataLabels(t *testing.T) {
 	}
 	metricsReceiver, err := factory.CreateMetricsReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		&cfg,
 		consumertest.NewNop(),
 	)
@@ -102,7 +92,7 @@ func TestFactoryBadAuthType(t *testing.T) {
 	}
 	_, err := factory.CreateMetricsReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop(),
 	)
@@ -125,6 +115,7 @@ func tlsConfig() *Config {
 	return &Config{
 		ScraperControllerSettings: scraperhelper.ScraperControllerSettings{
 			CollectionInterval: 10 * time.Second,
+			InitialDelay:       time.Second,
 		},
 		ClientConfig: kube.ClientConfig{
 			APIConfig: k8sconfig.APIConfig{
@@ -149,7 +140,7 @@ func TestCustomUnmarshaller(t *testing.T) {
 		args                  args
 		result                *Config
 		mockUnmarshallFailure bool
-		configOverride        map[string]interface{}
+		configOverride        map[string]any
 		wantErr               bool
 	}{
 		{
@@ -189,16 +180,18 @@ func TestCustomUnmarshaller(t *testing.T) {
 				intoCfg: &Config{
 					ScraperControllerSettings: scraperhelper.ScraperControllerSettings{
 						CollectionInterval: 10 * time.Second,
+						InitialDelay:       time.Second,
 					},
 				},
 			},
-			configOverride: map[string]interface{}{
+			configOverride: map[string]any{
 				"metric_groups":       []string{string(kubelet.ContainerMetricGroup)},
 				"collection_interval": 20 * time.Second,
 			},
 			result: &Config{
 				ScraperControllerSettings: scraperhelper.ScraperControllerSettings{
 					CollectionInterval: 20 * time.Second,
+					InitialDelay:       time.Second,
 				},
 				MetricGroupsToCollect: []kubelet.MetricGroup{kubelet.ContainerMetricGroup},
 			},
@@ -208,7 +201,7 @@ func TestCustomUnmarshaller(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.mockUnmarshallFailure {
 				// some arbitrary failure.
-				err := tt.args.componentParser.Merge(confmap.NewFromStringMap(map[string]interface{}{metricGroupsConfig: map[string]string{"foo": "bar"}}))
+				err := tt.args.componentParser.Merge(confmap.NewFromStringMap(map[string]any{metricGroupsConfig: map[string]string{"foo": "bar"}}))
 				require.NoError(t, err)
 			}
 

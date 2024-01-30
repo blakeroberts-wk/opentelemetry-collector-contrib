@@ -1,21 +1,11 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package datadogexporter
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,20 +15,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DataDog/datadog-agent/pkg/otlp/model/attributes"
 	tracelog "github.com/DataDog/datadog-agent/pkg/trace/log"
+	"github.com/DataDog/datadog-api-client-go/v2/api/datadogV2"
+	"github.com/DataDog/opentelemetry-mapping-go/pkg/inframetadata/payload"
+	"github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confignet"
-	"go.opentelemetry.io/collector/featuregate"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/collector/semconv/v1.6.1"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter/internal/testutil"
 )
 
@@ -50,59 +38,59 @@ func TestMain(m *testing.M) {
 type testlogger struct{}
 
 // Trace implements Logger.
-func (testlogger) Trace(v ...interface{}) {}
+func (testlogger) Trace(_ ...any) {}
 
 // Tracef implements Logger.
-func (testlogger) Tracef(format string, params ...interface{}) {}
+func (testlogger) Tracef(_ string, _ ...any) {}
 
 // Debug implements Logger.
-func (testlogger) Debug(v ...interface{}) { fmt.Println("DEBUG", fmt.Sprint(v...)) }
+func (testlogger) Debug(v ...any) { fmt.Println("DEBUG", fmt.Sprint(v...)) }
 
 // Debugf implements Logger.
-func (testlogger) Debugf(format string, params ...interface{}) {
+func (testlogger) Debugf(format string, params ...any) {
 	fmt.Println("DEBUG", fmt.Sprintf(format, params...))
 }
 
 // Info implements Logger.
-func (testlogger) Info(v ...interface{}) { fmt.Println("INFO", fmt.Sprint(v...)) }
+func (testlogger) Info(v ...any) { fmt.Println("INFO", fmt.Sprint(v...)) }
 
 // Infof implements Logger.
-func (testlogger) Infof(format string, params ...interface{}) {
+func (testlogger) Infof(format string, params ...any) {
 	fmt.Println("INFO", fmt.Sprintf(format, params...))
 }
 
 // Warn implements Logger.
-func (testlogger) Warn(v ...interface{}) error {
+func (testlogger) Warn(v ...any) error {
 	fmt.Println("WARN", fmt.Sprint(v...))
 	return nil
 }
 
 // Warnf implements Logger.
-func (testlogger) Warnf(format string, params ...interface{}) error {
+func (testlogger) Warnf(format string, params ...any) error {
 	fmt.Println("WARN", fmt.Sprintf(format, params...))
 	return nil
 }
 
 // Error implements Logger.
-func (testlogger) Error(v ...interface{}) error {
+func (testlogger) Error(v ...any) error {
 	fmt.Println("ERROR", fmt.Sprint(v...))
 	return nil
 }
 
 // Errorf implements Logger.
-func (testlogger) Errorf(format string, params ...interface{}) error {
+func (testlogger) Errorf(format string, params ...any) error {
 	fmt.Println("ERROR", fmt.Sprintf(format, params...))
 	return nil
 }
 
 // Critical implements Logger.
-func (testlogger) Critical(v ...interface{}) error {
+func (testlogger) Critical(v ...any) error {
 	fmt.Println("CRITICAL", fmt.Sprint(v...))
 	return nil
 }
 
 // Criticalf implements Logger.
-func (testlogger) Criticalf(format string, params ...interface{}) error {
+func (testlogger) Criticalf(format string, params ...any) error {
 	fmt.Println("CRITICAL", fmt.Sprintf(format, params...))
 	return nil
 }
@@ -113,7 +101,13 @@ func (testlogger) Flush() {}
 func TestTracesSource(t *testing.T) {
 	reqs := make(chan []byte, 1)
 	metricsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/series" {
+		var expectedMetricEndpoint string
+		if isMetricExportV2Enabled() {
+			expectedMetricEndpoint = testutil.MetricV2Endpoint
+		} else {
+			expectedMetricEndpoint = testutil.MetricV1Endpoint
+		}
+		if r.URL.Path != expectedMetricEndpoint {
 			// we only want to capture series payloads
 			return
 		}
@@ -132,7 +126,6 @@ func TestTracesSource(t *testing.T) {
 	defer tracesServer.Close()
 
 	cfg := Config{
-		ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 		API: APIConfig{
 			Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
@@ -149,24 +142,19 @@ func TestTracesSource(t *testing.T) {
 	}
 
 	assert := assert.New(t)
-	params := componenttest.NewNopExporterCreateSettings()
-	reg := featuregate.NewRegistry()
-	reg.MustRegisterID(metadata.HostnamePreviewFeatureGate, featuregate.StageBeta)
-	assert.NoError(reg.Apply(map[string]bool{
-		metadata.HostnamePreviewFeatureGate: true,
-	}))
-	f := newFactoryWithRegistry(reg)
+	params := exportertest.NewNopCreateSettings()
+	f := NewFactory()
 	exporter, err := f.CreateTracesExporter(context.Background(), params, &cfg)
 	assert.NoError(err)
 
-	// Payload specifies a sub-set of a metrics series payload.
+	// Payload specifies a sub-set of a Zorkian metrics series payload.
 	type Payload struct {
 		Series []struct {
 			Host string   `json:"host,omitempty"`
 			Tags []string `json:"tags,omitempty"`
 		} `json:"series"`
 	}
-	// getHostTags extracts the host and tags from the metrics series payload
+	// getHostTags extracts the host and tags from the Zorkian metrics series payload
 	// body found in data.
 	getHostTags := func(data []byte) (host string, tags []string) {
 		var p Payload
@@ -174,25 +162,38 @@ func TestTracesSource(t *testing.T) {
 		assert.Len(p.Series, 1)
 		return p.Series[0].Host, p.Series[0].Tags
 	}
+	// getHostTagsV2 extracts the host and tags from the native DatadogV2 metrics series payload
+	// body found in data.
+	getHostTagsV2 := func(data []byte) (host string, tags []string) {
+		buf := bytes.NewBuffer(data)
+		reader, derr := gzip.NewReader(buf)
+		assert.NoError(derr)
+		dec := json.NewDecoder(reader)
+		var p datadogV2.MetricPayload
+		assert.NoError(dec.Decode(&p))
+		assert.Len(p.Series, 1)
+		assert.Len(p.Series[0].Resources, 1)
+		return *p.Series[0].Resources[0].Name, p.Series[0].Tags
+	}
 	for _, tt := range []struct {
-		attrs map[string]interface{}
+		attrs map[string]any
 		host  string
 		tags  []string
 	}{
 		{
-			attrs: map[string]interface{}{},
+			attrs: map[string]any{},
 			host:  "fallbackHostname",
 			tags:  []string{"version:latest", "command:otelcol"},
 		},
 		{
-			attrs: map[string]interface{}{
+			attrs: map[string]any{
 				attributes.AttributeDatadogHostname: "customName",
 			},
 			host: "customName",
 			tags: []string{"version:latest", "command:otelcol"},
 		},
 		{
-			attrs: map[string]interface{}{
+			attrs: map[string]any{
 				semconv.AttributeCloudProvider:      semconv.AttributeCloudProviderAWS,
 				semconv.AttributeCloudPlatform:      semconv.AttributeCloudPlatformAWSECS,
 				semconv.AttributeAWSECSTaskARN:      "example-task-ARN",
@@ -211,9 +212,15 @@ func TestTracesSource(t *testing.T) {
 			timeout := time.After(time.Second)
 			select {
 			case data := <-reqs:
-				host, tags := getHostTags(data)
-				assert.Equal(host, tt.host)
-				assert.EqualValues(tags, tt.tags)
+				var host string
+				var tags []string
+				if isMetricExportV2Enabled() {
+					host, tags = getHostTagsV2(data)
+				} else {
+					host, tags = getHostTags(data)
+				}
+				assert.Equal(tt.host, host)
+				assert.EqualValues(tt.tags, tags)
 			case <-timeout:
 				t.Fatal("timeout")
 			}
@@ -234,7 +241,6 @@ func TestTraceExporter(t *testing.T) {
 
 	defer server.Close()
 	cfg := Config{
-		ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 		API: APIConfig{
 			Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
@@ -252,10 +258,11 @@ func TestTraceExporter(t *testing.T) {
 			},
 			IgnoreResources: []string{},
 			flushInterval:   0.1,
+			TraceBuffer:     2,
 		},
 	}
 
-	params := componenttest.NewNopExporterCreateSettings()
+	params := exportertest.NewNopCreateSettings()
 	f := NewFactory()
 	exporter, err := f.CreateTracesExporter(context.Background(), params, &cfg)
 	assert.NoError(t, err)
@@ -280,7 +287,7 @@ func TestNewTracesExporter(t *testing.T) {
 	cfg := &Config{}
 	cfg.API.Key = "ddog_32_characters_long_api_key1"
 	cfg.Metrics.TCPAddr.Endpoint = metricsServer.URL
-	params := componenttest.NewNopExporterCreateSettings()
+	params := exportertest.NewNopCreateSettings()
 
 	// The client should have been created correctly
 	f := NewFactory()
@@ -312,7 +319,7 @@ func TestPushTraceData(t *testing.T) {
 		},
 	}
 
-	params := componenttest.NewNopExporterCreateSettings()
+	params := exportertest.NewNopCreateSettings()
 	f := NewFactory()
 	exp, err := f.CreateTracesExporter(context.Background(), params, cfg)
 	assert.NoError(t, err)
@@ -323,7 +330,7 @@ func TestPushTraceData(t *testing.T) {
 	assert.NoError(t, err)
 
 	body := <-server.MetadataChan
-	var recvMetadata metadata.HostMetadata
+	var recvMetadata payload.HostMetadata
 	err = json.Unmarshal(body, &recvMetadata)
 	require.NoError(t, err)
 	assert.Equal(t, recvMetadata.InternalHostname, "custom-hostname")
@@ -333,11 +340,11 @@ func simpleTraces() ptrace.Traces {
 	return genTraces([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4}, nil)
 }
 
-func simpleTracesWithAttributes(attrs map[string]interface{}) ptrace.Traces {
+func simpleTracesWithAttributes(attrs map[string]any) ptrace.Traces {
 	return genTraces([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4}, attrs)
 }
 
-func genTraces(traceID pcommon.TraceID, attrs map[string]interface{}) ptrace.Traces {
+func genTraces(traceID pcommon.TraceID, attrs map[string]any) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	rspans := traces.ResourceSpans().AppendEmpty()
 	span := rspans.ScopeSpans().AppendEmpty().Spans().AppendEmpty()

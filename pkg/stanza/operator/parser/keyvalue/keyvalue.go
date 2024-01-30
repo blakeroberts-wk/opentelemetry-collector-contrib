@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package keyvalue // import "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/parser/keyvalue"
 
@@ -99,7 +88,7 @@ func (kv *Parser) Process(ctx context.Context, entry *entry.Entry) error {
 }
 
 // parse will parse a value as key values.
-func (kv *Parser) parse(value interface{}) (interface{}, error) {
+func (kv *Parser) parse(value any) (any, error) {
 	switch m := value.(type) {
 	case string:
 		return kv.parser(m, kv.delimiter)
@@ -108,16 +97,16 @@ func (kv *Parser) parse(value interface{}) (interface{}, error) {
 	}
 }
 
-func (kv *Parser) parser(input string, delimiter string) (map[string]interface{}, error) {
+func (kv *Parser) parser(input string, delimiter string) (map[string]any, error) {
 	if input == "" {
 		return nil, fmt.Errorf("parse from field %s is empty", kv.ParseFrom.String())
 	}
 
-	parsed := make(map[string]interface{})
+	parsed := make(map[string]any)
 
 	var err error
 	for _, raw := range kv.pairSplitFunc(input) {
-		m := strings.Split(raw, delimiter)
+		m := strings.SplitN(raw, delimiter, 2)
 		if len(m) != 2 {
 			e := fmt.Errorf("expected '%s' to split by '%s' into two items, got %d", raw, delimiter, len(m))
 			err = multierr.Append(err, e)

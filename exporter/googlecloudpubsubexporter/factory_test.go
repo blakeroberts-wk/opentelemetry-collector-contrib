@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package googlecloudpubsubexporter
 
@@ -21,6 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/exporter/exportertest"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudpubsubexporter/internal/metadata"
 )
 
 func TestCreateDefaultConfig(t *testing.T) {
@@ -32,18 +24,18 @@ func TestCreateDefaultConfig(t *testing.T) {
 
 func TestType(t *testing.T) {
 	factory := NewFactory()
-	assert.Equal(t, component.Type(typeStr), factory.Type())
+	assert.Equal(t, component.Type(metadata.Type), factory.Type())
 }
 
 func TestCreateTracesExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	eCfg := cfg.(*Config)
-	eCfg.endpoint = "http://testing.invalid"
+	eCfg.Endpoint = "http://testing.invalid"
 
 	te, err := factory.CreateTracesExporter(
 		context.Background(),
-		componenttest.NewNopExporterCreateSettings(),
+		exportertest.NewNopCreateSettings(),
 		eCfg,
 	)
 	assert.NoError(t, err)
@@ -54,11 +46,11 @@ func TestCreateMetricsExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	eCfg := cfg.(*Config)
-	eCfg.endpoint = "http://testing.invalid"
+	eCfg.Endpoint = "http://testing.invalid"
 
 	me, err := factory.CreateMetricsExporter(
 		context.Background(),
-		componenttest.NewNopExporterCreateSettings(),
+		exportertest.NewNopCreateSettings(),
 		eCfg,
 	)
 	assert.NoError(t, err)
@@ -69,11 +61,11 @@ func TestLogsCreateExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	eCfg := cfg.(*Config)
-	eCfg.endpoint = "http://testing.invalid"
+	eCfg.Endpoint = "http://testing.invalid"
 
 	me, err := factory.CreateLogsExporter(
 		context.Background(),
-		componenttest.NewNopExporterCreateSettings(),
+		exportertest.NewNopCreateSettings(),
 		eCfg,
 	)
 	assert.NoError(t, err)
@@ -84,9 +76,9 @@ func TestEnsureExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	eCfg := cfg.(*Config)
-	eCfg.endpoint = "http://testing.invalid"
+	eCfg.Endpoint = "http://testing.invalid"
 
-	exporter1 := ensureExporter(componenttest.NewNopExporterCreateSettings(), eCfg)
-	exporter2 := ensureExporter(componenttest.NewNopExporterCreateSettings(), eCfg)
+	exporter1 := ensureExporter(exportertest.NewNopCreateSettings(), eCfg)
+	exporter2 := ensureExporter(exportertest.NewNopCreateSettings(), eCfg)
 	assert.Equal(t, exporter1, exporter2)
 }

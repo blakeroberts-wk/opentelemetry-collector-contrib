@@ -1,23 +1,12 @@
-// Copyright 2020, OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package observer
 
 import (
-	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +15,6 @@ func TestEndpointEnv(t *testing.T) {
 		name     string
 		endpoint Endpoint
 		want     EndpointEnv
-		wantErr  bool
 	}{
 		{
 			name: "Pod",
@@ -59,10 +47,9 @@ func TestEndpointEnv(t *testing.T) {
 				"uid":       "pod-uid",
 				"namespace": "pod-namespace",
 			},
-			wantErr: false,
 		},
 		{
-			name: "K8s port",
+			name: "K8s pod port",
 			endpoint: Endpoint{
 				ID:     EndpointID("port_id"),
 				Target: "192.68.73.2",
@@ -102,7 +89,42 @@ func TestEndpointEnv(t *testing.T) {
 				},
 				"transport": ProtocolTCP,
 			},
-			wantErr: false,
+		},
+		{
+			name: "Service",
+			endpoint: Endpoint{
+				ID:     EndpointID("service_id"),
+				Target: "service.namespace",
+				Details: &K8sService{
+					Name: "service_name",
+					UID:  "service-uid",
+					Labels: map[string]string{
+						"label_key": "label_val",
+					},
+					Annotations: map[string]string{
+						"annotation_1": "value_1",
+					},
+					Namespace:   "service-namespace",
+					ServiceType: "LoadBalancer",
+					ClusterIP:   "192.68.73.2",
+				},
+			},
+			want: EndpointEnv{
+				"type":     "k8s.service",
+				"endpoint": "service.namespace",
+				"id":       "service_id",
+				"name":     "service_name",
+				"labels": map[string]string{
+					"label_key": "label_val",
+				},
+				"annotations": map[string]string{
+					"annotation_1": "value_1",
+				},
+				"uid":          "service-uid",
+				"namespace":    "service-namespace",
+				"cluster_ip":   "192.68.73.2",
+				"service_type": "LoadBalancer",
+			},
 		},
 		{
 			name: "Host port",
@@ -127,7 +149,6 @@ func TestEndpointEnv(t *testing.T) {
 				"port":         uint16(2379),
 				"transport":    ProtocolUDP,
 			},
-			wantErr: false,
 		},
 		{
 			name: "Container",
@@ -166,7 +187,6 @@ func TestEndpointEnv(t *testing.T) {
 				},
 				"endpoint": "127.0.0.1",
 			},
-			wantErr: false,
 		},
 		{
 			name: "Kubernetes Node",
@@ -209,19 +229,13 @@ func TestEndpointEnv(t *testing.T) {
 					"label_key": "label_val",
 				},
 			},
-			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.endpoint.Env()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Env() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Env() got = %v, want %v", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package fluentforwardreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/fluentforwardreceiver"
 
@@ -20,6 +9,7 @@ import (
 	"go.opencensus.io/stats"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/fluentforwardreceiver/observ"
@@ -33,13 +23,15 @@ type Collector struct {
 	nextConsumer consumer.Logs
 	eventCh      <-chan Event
 	logger       *zap.Logger
+	obsrecv      *receiverhelper.ObsReport
 }
 
-func newCollector(eventCh <-chan Event, next consumer.Logs, logger *zap.Logger) *Collector {
+func newCollector(eventCh <-chan Event, next consumer.Logs, logger *zap.Logger, obsrecv *receiverhelper.ObsReport) *Collector {
 	return &Collector{
 		nextConsumer: next,
 		eventCh:      eventCh,
 		logger:       logger,
+		obsrecv:      obsrecv,
 	}
 }
 
@@ -62,8 +54,11 @@ func (c *Collector) processEvents(ctx context.Context) {
 			// efficiency on LogResource allocations.
 			c.fillBufferUntilChanEmpty(logSlice)
 
-			stats.Record(context.Background(), observ.RecordsGenerated.M(int64(out.LogRecordCount())))
-			_ = c.nextConsumer.ConsumeLogs(ctx, out)
+			logRecordCount := out.LogRecordCount()
+			stats.Record(context.Background(), observ.RecordsGenerated.M(int64(logRecordCount)))
+			obsCtx := c.obsrecv.StartLogsOp(ctx)
+			err := c.nextConsumer.ConsumeLogs(obsCtx, out)
+			c.obsrecv.EndLogsOp(obsCtx, "fluent", logRecordCount, err)
 		}
 	}
 }

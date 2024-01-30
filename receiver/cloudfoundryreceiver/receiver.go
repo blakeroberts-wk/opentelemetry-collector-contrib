@@ -1,16 +1,5 @@
-// Copyright 2019, OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package cloudfoundryreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/cloudfoundryreceiver"
 
@@ -24,8 +13,9 @@ import (
 	"code.cloudfoundry.org/go-loggregator"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 )
 
 const (
@@ -34,30 +24,30 @@ const (
 	instrumentationLibName = "otelcol/cloudfoundry"
 )
 
-var _ component.MetricsReceiver = (*cloudFoundryReceiver)(nil)
+var _ receiver.Metrics = (*cloudFoundryReceiver)(nil)
 
-// newCloudFoundryReceiver implements the component.MetricsReceiver for Cloud Foundry protocol.
+// newCloudFoundryReceiver implements the receiver.Metrics for Cloud Foundry protocol.
 type cloudFoundryReceiver struct {
 	settings          component.TelemetrySettings
 	cancel            context.CancelFunc
 	config            Config
 	nextConsumer      consumer.Metrics
-	obsrecv           *obsreport.Receiver
+	obsrecv           *receiverhelper.ObsReport
 	goroutines        sync.WaitGroup
 	receiverStartTime time.Time
 }
 
 // newCloudFoundryReceiver creates the Cloud Foundry receiver with the given parameters.
 func newCloudFoundryReceiver(
-	settings component.ReceiverCreateSettings,
+	settings receiver.CreateSettings,
 	config Config,
-	nextConsumer consumer.Metrics) (component.MetricsReceiver, error) {
+	nextConsumer consumer.Metrics) (receiver.Metrics, error) {
 
 	if nextConsumer == nil {
 		return nil, component.ErrNilNextConsumer
 	}
 
-	obsrecv, err := obsreport.NewReceiver(obsreport.ReceiverSettings{
+	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             settings.ID,
 		Transport:              transport,
 		ReceiverCreateSettings: settings,
@@ -76,7 +66,7 @@ func newCloudFoundryReceiver(
 }
 
 func (cfr *cloudFoundryReceiver) Start(ctx context.Context, host component.Host) error {
-	tokenProvider, tokenErr := newUAATokenProvider(cfr.settings.Logger, cfr.config.UAA.LimitedHTTPClientSettings, cfr.config.UAA.Username, cfr.config.UAA.Password)
+	tokenProvider, tokenErr := newUAATokenProvider(cfr.settings.Logger, cfr.config.UAA.LimitedHTTPClientSettings, cfr.config.UAA.Username, string(cfr.config.UAA.Password))
 	if tokenErr != nil {
 		return fmt.Errorf("create cloud foundry UAA token provider: %w", tokenErr)
 	}
@@ -91,7 +81,7 @@ func (cfr *cloudFoundryReceiver) Start(ctx context.Context, host component.Host)
 		return fmt.Errorf("creating cloud foundry RLP envelope stream factory: %w", streamErr)
 	}
 
-	innerCtx, cancel := context.WithCancel(context.Background())
+	innerCtx, cancel := context.WithCancel(ctx)
 	cfr.cancel = cancel
 
 	cfr.goroutines.Add(1)
@@ -120,6 +110,9 @@ func (cfr *cloudFoundryReceiver) Start(ctx context.Context, host component.Host)
 }
 
 func (cfr *cloudFoundryReceiver) Shutdown(_ context.Context) error {
+	if cfr.cancel == nil {
+		return nil
+	}
 	cfr.cancel()
 	cfr.goroutines.Wait()
 	return nil

@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package kafkareceiver
 
@@ -22,11 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver/internal/metadata"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -41,15 +31,16 @@ func TestLoadConfig(t *testing.T) {
 		expectedErr error
 	}{
 		{
-			id: component.NewIDWithName(typeStr, ""),
+			id: component.NewIDWithName(metadata.Type, ""),
 			expected: &Config{
-				ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
-				Topic:            "spans",
-				Encoding:         "otlp_proto",
-				Brokers:          []string{"foo:123", "bar:456"},
-				ClientID:         "otel-collector",
-				GroupID:          "otel-collector",
-				Authentication: kafkaexporter.Authentication{
+				Topic:                                "spans",
+				Encoding:                             "otlp_proto",
+				Brokers:                              []string{"foo:123", "bar:456"},
+				ResolveCanonicalBootstrapServersOnly: true,
+				ClientID:                             "otel-collector",
+				GroupID:                              "otel-collector",
+				InitialOffset:                        "latest",
+				Authentication: kafka.Authentication{
 					TLS: &configtls.TLSClientSetting{
 						TLSSetting: configtls.TLSSetting{
 							CAFile:   "ca.pem",
@@ -73,15 +64,15 @@ func TestLoadConfig(t *testing.T) {
 		},
 		{
 
-			id: component.NewIDWithName(typeStr, "logs"),
+			id: component.NewIDWithName(metadata.Type, "logs"),
 			expected: &Config{
-				ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
-				Topic:            "logs",
-				Encoding:         "direct",
-				Brokers:          []string{"coffee:123", "foobar:456"},
-				ClientID:         "otel-collector",
-				GroupID:          "otel-collector",
-				Authentication: kafkaexporter.Authentication{
+				Topic:         "logs",
+				Encoding:      "direct",
+				Brokers:       []string{"coffee:123", "foobar:456"},
+				ClientID:      "otel-collector",
+				GroupID:       "otel-collector",
+				InitialOffset: "earliest",
+				Authentication: kafka.Authentication{
 					TLS: &configtls.TLSClientSetting{
 						TLSSetting: configtls.TLSSetting{
 							CAFile:   "ca.pem",

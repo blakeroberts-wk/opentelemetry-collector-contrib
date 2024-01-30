@@ -1,16 +1,5 @@
-// Copyright 2020, OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package splunkhecexporter
 
@@ -21,13 +10,11 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
-	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 )
 
 func Test_mapLogRecordToSplunkEvent(t *testing.T) {
-	logger := zap.NewNop()
 	ts := pcommon.Timestamp(123)
 
 	tests := []struct {
@@ -57,7 +44,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{"custom": "custom"},
+				commonLogSplunkEvent("mylog", ts, map[string]any{"custom": "custom"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -81,7 +68,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{"custom": "custom"},
+				commonLogSplunkEvent("mylog", ts, map[string]any{"custom": "custom"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -102,7 +89,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{},
+				commonLogSplunkEvent("mylog", ts, map[string]any{},
 					"unknown", "source", "sourcetype"),
 			},
 		},
@@ -126,7 +113,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{"foo": float64(123)}, "myhost", "myapp", "myapp-type"),
+				commonLogSplunkEvent("mylog", ts, map[string]any{"foo": float64(123)}, "myhost", "myapp", "myapp-type"),
 			},
 		},
 		{
@@ -146,7 +133,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{"custom": "custom"}, "unknown", "source", "sourcetype"),
+				commonLogSplunkEvent("mylog", ts, map[string]any{"custom": "custom"}, "unknown", "source", "sourcetype"),
 			},
 		},
 		{
@@ -181,7 +168,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 			},
 			wantSplunkEvents: []*splunk.Event{
 				func() *splunk.Event {
-					event := commonLogSplunkEvent("mylog", ts, map[string]interface{}{"custom": "custom", "myseverity": "DEBUG", "myseveritynum": plog.SeverityNumber(5)}, "myhost", "mysource", "mysourcetype")
+					event := commonLogSplunkEvent("mylog", ts, map[string]any{"custom": "custom", "myseverity": "DEBUG", "myseveritynum": plog.SeverityNumber(5)}, "myhost", "mysource", "mysourcetype")
 					event.Index = "myindex"
 					return event
 				}(),
@@ -201,7 +188,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(nil, 0, map[string]interface{}{}, "unknown", "source", "sourcetype"),
+				commonLogSplunkEvent("", 0, map[string]any{}, "unknown", "source", "sourcetype"),
 			},
 		},
 		{
@@ -220,7 +207,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: func() []*splunk.Event {
-				event := commonLogSplunkEvent(nil, 0, map[string]interface{}{}, "unknown", "source", "sourcetype")
+				event := commonLogSplunkEvent("", 0, map[string]any{}, "unknown", "source", "sourcetype")
 				event.Fields["span_id"] = "0000000000000032"
 				event.Fields["trace_id"] = "00000000000000000000000000000064"
 				return []*splunk.Event{event}
@@ -246,7 +233,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(float64(42), ts, map[string]interface{}{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
+				commonLogSplunkEvent(float64(42), ts, map[string]any{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
 			},
 		},
 		{
@@ -269,7 +256,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(int64(42), ts, map[string]interface{}{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
+				commonLogSplunkEvent(int64(42), ts, map[string]any{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
 			},
 		},
 		{
@@ -292,7 +279,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(true, ts, map[string]interface{}{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
+				commonLogSplunkEvent(true, ts, map[string]any{"custom": "custom"}, "myhost", "myapp", "myapp-type"),
 			},
 		},
 		{
@@ -319,8 +306,8 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(map[string]interface{}{"23": float64(45), "foo": "bar"}, ts,
-					map[string]interface{}{"custom": "custom"},
+				commonLogSplunkEvent(map[string]any{"23": float64(45), "foo": "bar"}, ts,
+					map[string]any{"custom": "custom"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -343,7 +330,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent(nil, ts, map[string]interface{}{"custom": "custom"},
+				commonLogSplunkEvent("", ts, map[string]any{"custom": "custom"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -370,7 +357,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent([]interface{}{"foo"}, ts, map[string]interface{}{"custom": "custom"},
+				commonLogSplunkEvent([]any{"foo"}, ts, map[string]any{"custom": "custom"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -395,7 +382,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return createDefaultConfig().(*Config)
 			},
 			wantSplunkEvents: func() []*splunk.Event {
-				event := commonLogSplunkEvent("mylog", ts, map[string]interface{}{
+				event := commonLogSplunkEvent("mylog", ts, map[string]any{
 					"resourceAttr1": "some_string",
 				}, "myhost-resource", "myapp-resource", "myapp-type-from-resource-attr")
 				event.Index = "index-resource"
@@ -426,7 +413,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 				return config
 			},
 			wantSplunkEvents: []*splunk.Event{
-				commonLogSplunkEvent("mylog", ts, map[string]interface{}{"custom": "custom", "otel.log.severity.number": plog.SeverityNumberDebug, "otel.log.severity.text": "DEBUG"},
+				commonLogSplunkEvent("mylog", ts, map[string]any{"custom": "custom", "otel.log.severity.number": plog.SeverityNumberDebug, "otel.log.severity.text": "DEBUG"},
 					"myhost", "myapp", "myapp-type"),
 			},
 		},
@@ -435,7 +422,7 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, want := range tt.wantSplunkEvents {
 				config := tt.configDataFn()
-				got := mapLogRecordToSplunkEvent(tt.logResourceFn(), tt.logRecordFn(), config, logger)
+				got := mapLogRecordToSplunkEvent(tt.logResourceFn(), tt.logRecordFn(), config)
 				assert.EqualValues(t, want, got)
 			}
 		})
@@ -443,9 +430,9 @@ func Test_mapLogRecordToSplunkEvent(t *testing.T) {
 }
 
 func commonLogSplunkEvent(
-	event interface{},
+	event any,
 	ts pcommon.Timestamp,
-	fields map[string]interface{},
+	fields map[string]any,
 	host string,
 	source string,
 	sourcetype string,
@@ -461,21 +448,88 @@ func commonLogSplunkEvent(
 }
 
 func Test_emptyLogRecord(t *testing.T) {
-	event := mapLogRecordToSplunkEvent(pcommon.NewResource(), plog.NewLogRecord(), &Config{}, zap.NewNop())
-	assert.Nil(t, event.Time)
+	event := mapLogRecordToSplunkEvent(pcommon.NewResource(), plog.NewLogRecord(), &Config{})
+	assert.Zero(t, event.Time)
 	assert.Equal(t, event.Host, "unknown")
 	assert.Zero(t, event.Source)
 	assert.Zero(t, event.SourceType)
 	assert.Zero(t, event.Index)
-	assert.Nil(t, event.Event)
+	assert.Equal(t, "", event.Event)
 	assert.Empty(t, event.Fields)
 }
 
 func Test_nanoTimestampToEpochMilliseconds(t *testing.T) {
 	splunkTs := nanoTimestampToEpochMilliseconds(1001000000)
-	assert.Equal(t, 1.001, *splunkTs)
+	assert.Equal(t, 1.001, splunkTs)
 	splunkTs = nanoTimestampToEpochMilliseconds(1001990000)
-	assert.Equal(t, 1.002, *splunkTs)
+	assert.Equal(t, 1.002, splunkTs)
 	splunkTs = nanoTimestampToEpochMilliseconds(0)
-	assert.True(t, nil == splunkTs)
+	assert.Zero(t, splunkTs)
+}
+
+func Test_mergeValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		val      any
+		expected map[string]any
+	}{
+		{
+			name:     "int",
+			key:      "intKey",
+			val:      0,
+			expected: map[string]any{"intKey": 0},
+		},
+		{
+			name:     "flat_array",
+			key:      "arrayKey",
+			val:      []any{0, 1, 2, 3},
+			expected: map[string]any{"arrayKey": []any{0, 1, 2, 3}},
+		},
+		{
+			name:     "nested_array",
+			key:      "arrayKey",
+			val:      []any{0, 1, []any{2, 3}},
+			expected: map[string]any{"arrayKey": "[0,1,[2,3]]"},
+		},
+		{
+			name:     "array_of_map",
+			key:      "arrayKey",
+			val:      []any{0, 1, map[string]any{"3": 3}},
+			expected: map[string]any{"arrayKey": "[0,1,{\"3\":3}]"},
+		},
+		{
+			name:     "flat_map",
+			key:      "mapKey",
+			val:      map[string]any{"1": 1, "2": 2},
+			expected: map[string]any{"mapKey.1": 1, "mapKey.2": 2},
+		},
+		{
+			name:     "nested_map",
+			key:      "mapKey",
+			val:      map[string]any{"1": 1, "2": 2, "nested": map[string]any{"3": 3, "4": 4}},
+			expected: map[string]any{"mapKey.1": 1, "mapKey.2": 2, "mapKey.nested.3": 3, "mapKey.nested.4": 4},
+		},
+		{
+			name:     "flat_array_in_nested_map",
+			key:      "mapKey",
+			val:      map[string]any{"1": 1, "2": 2, "nested": map[string]any{"3": 3, "flat_array": []any{4}}},
+			expected: map[string]any{"mapKey.1": 1, "mapKey.2": 2, "mapKey.nested.3": 3, "mapKey.nested.flat_array": []any{4}},
+		},
+		{
+			name:     "nested_array_in_nested_map",
+			key:      "mapKey",
+			val:      map[string]any{"1": 1, "2": 2, "nested": map[string]any{"3": 3, "nested_array": []any{4, []any{5}}}},
+			expected: map[string]any{"mapKey.1": 1, "mapKey.2": 2, "mapKey.nested.3": 3, "mapKey.nested.nested_array": "[4,[5]]"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := make(map[string]any)
+			mergeValue(fields, tt.key, tt.val)
+			assert.Equal(t, tt.expected, fields)
+		})
+	}
+
 }

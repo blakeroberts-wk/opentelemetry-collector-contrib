@@ -1,28 +1,17 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package logstransformprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/logstransformprocessor"
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"runtime"
 	"sync"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/extension/experimental/storage"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.uber.org/zap"
@@ -32,14 +21,11 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/pipeline"
 )
 
-type outputType struct {
-	logs plog.Logs
-	err  error
-}
-
 type logsTransformProcessor struct {
 	logger *zap.Logger
 	config *Config
+
+	consumer consumer.Logs
 
 	pipe          *pipeline.DirectedPipeline
 	firstOperator operator.Operator
@@ -47,39 +33,60 @@ type logsTransformProcessor struct {
 	converter     *adapter.Converter
 	fromConverter *adapter.FromPdataConverter
 	wg            sync.WaitGroup
-	outputChannel chan outputType
+	shutdownFns   []component.ShutdownFunc
+}
+
+func newProcessor(config *Config, nextConsumer consumer.Logs, logger *zap.Logger) (*logsTransformProcessor, error) {
+	p := &logsTransformProcessor{
+		logger:   logger,
+		config:   config,
+		consumer: nextConsumer,
+	}
+
+	baseCfg := p.config.BaseConfig
+
+	p.emitter = adapter.NewLogEmitter(p.logger.Sugar())
+	pipe, err := pipeline.Config{
+		Operators:     baseCfg.Operators,
+		DefaultOutput: p.emitter,
+	}.Build(p.logger.Sugar())
+	if err != nil {
+		return nil, err
+	}
+
+	p.pipe = pipe
+
+	return p, nil
+}
+
+func (ltp *logsTransformProcessor) Capabilities() consumer.Capabilities {
+	return consumer.Capabilities{MutatesData: true}
 }
 
 func (ltp *logsTransformProcessor) Shutdown(ctx context.Context) error {
-	ltp.logger.Info("Stopping logs transform processor")
-	pipelineErr := ltp.pipe.Stop()
-	ltp.converter.Stop()
-	ltp.fromConverter.Stop()
+	for _, fn := range ltp.shutdownFns {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
 	ltp.wg.Wait()
 
-	return pipelineErr
+	return nil
 }
 
-func (ltp *logsTransformProcessor) Start(ctx context.Context, host component.Host) error {
-	baseCfg := ltp.config.BaseConfig
-
-	ltp.emitter = adapter.NewLogEmitter(ltp.logger.Sugar())
-	pipe, err := pipeline.Config{
-		Operators:     baseCfg.Operators,
-		DefaultOutput: ltp.emitter,
-	}.Build(ltp.logger.Sugar())
-	if err != nil {
-		return err
-	}
+func (ltp *logsTransformProcessor) Start(ctx context.Context, _ component.Host) error {
 
 	// There is no need for this processor to use storage
-	err = pipe.Start(storage.NewNopClient())
+	err := ltp.pipe.Start(storage.NewNopClient())
 	if err != nil {
 		return err
 	}
+	ltp.shutdownFns = append(ltp.shutdownFns, func(ctx context.Context) error {
+		ltp.logger.Info("Stopping logs transform processor")
+		return ltp.pipe.Stop()
+	})
 
-	ltp.pipe = pipe
-	pipelineOperators := pipe.Operators()
+	pipelineOperators := ltp.pipe.Operators()
 	if len(pipelineOperators) == 0 {
 		return errors.New("processor requires at least one operator to be configured")
 	}
@@ -89,12 +96,17 @@ func (ltp *logsTransformProcessor) Start(ctx context.Context, host component.Hos
 
 	ltp.converter = adapter.NewConverter(ltp.logger)
 	ltp.converter.Start()
+	ltp.shutdownFns = append(ltp.shutdownFns, func(ctx context.Context) error {
+		ltp.converter.Stop()
+		return nil
+	})
 
 	ltp.fromConverter = adapter.NewFromPdataConverter(wkrCount, ltp.logger)
 	ltp.fromConverter.Start()
-
-	ltp.outputChannel = make(chan outputType)
-
+	ltp.shutdownFns = append(ltp.shutdownFns, func(ctx context.Context) error {
+		ltp.fromConverter.Stop()
+		return nil
+	})
 	// Below we're starting 3 loops:
 	// * first which reads all the logs translated by the fromConverter and then forwards
 	//   them to pipeline
@@ -110,37 +122,15 @@ func (ltp *logsTransformProcessor) Start(ctx context.Context, host component.Hos
 
 	// ...
 	// * third which reads all the logs produced by the converter
-	//   (aggregated by Resource) and then places them on the outputChannel
+	//   (aggregated by Resource) and then places them on the next consumer
 	ltp.wg.Add(1)
 	go ltp.consumerLoop(ctx)
-
 	return nil
 }
 
-func (ltp *logsTransformProcessor) processLogs(ctx context.Context, ld plog.Logs) (plog.Logs, error) {
+func (ltp *logsTransformProcessor) ConsumeLogs(_ context.Context, ld plog.Logs) error {
 	// Add the logs to the chain
-	err := ltp.fromConverter.Batch(ld)
-	if err != nil {
-		return ld, err
-	}
-
-	doneChan := ctx.Done()
-	for {
-		select {
-		case <-doneChan:
-			ltp.logger.Debug("loop stopped")
-			return ld, errors.New("processor interrupted")
-		case output, ok := <-ltp.outputChannel:
-			if !ok {
-				return ld, errors.New("processor encountered an issue receiving logs from stanza operators pipeline")
-			}
-			if output.err != nil {
-				return ld, err
-			}
-
-			return output.logs, nil
-		}
-	}
+	return ltp.fromConverter.Batch(ld)
 }
 
 // converterLoop reads the log entries produced by the fromConverter and sends them
@@ -163,7 +153,7 @@ func (ltp *logsTransformProcessor) converterLoop(ctx context.Context) {
 			for _, e := range entries {
 				// Add item to the first operator of the pipeline manually
 				if err := ltp.firstOperator.Process(ctx, e); err != nil {
-					ltp.outputChannel <- outputType{err: fmt.Errorf("processor encountered an issue with the pipeline: %w", err)}
+					ltp.logger.Error("processor encountered an issue with the pipeline", zap.Error(err))
 					break
 				}
 			}
@@ -188,7 +178,7 @@ func (ltp *logsTransformProcessor) emitterLoop(ctx context.Context) {
 			}
 
 			if err := ltp.converter.Batch(e); err != nil {
-				ltp.outputChannel <- outputType{err: fmt.Errorf("processor encountered an issue with the converter: %w", err)}
+				ltp.logger.Error("processor encountered an issue with the converter", zap.Error(err))
 			}
 		}
 	}
@@ -210,7 +200,9 @@ func (ltp *logsTransformProcessor) consumerLoop(ctx context.Context) {
 				return
 			}
 
-			ltp.outputChannel <- outputType{logs: pLogs, err: nil}
+			if err := ltp.consumer.ConsumeLogs(ctx, pLogs); err != nil {
+				ltp.logger.Error("processor encountered an issue with next consumer", zap.Error(err))
+			}
 		}
 	}
 }

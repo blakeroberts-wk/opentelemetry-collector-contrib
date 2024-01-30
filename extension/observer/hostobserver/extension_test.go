@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package hostobserver
 
@@ -21,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"syscall"
 	"testing"
@@ -135,7 +123,7 @@ type hostPort struct {
 	err  error
 }
 
-func getHostAndPort(i interface{}) hostPort {
+func getHostAndPort(i any) hostPort {
 	var host, port string
 	var err error
 	switch conn := i.(type) {
@@ -316,12 +304,12 @@ func TestPortTypeToProtocol(t *testing.T) {
 func TestCollectConnectionDetails(t *testing.T) {
 	tests := []struct {
 		name string
-		conn psnet.ConnectionStat
+		conn *psnet.ConnectionStat
 		want connectionDetails
 	}{
 		{
 			name: "TCPv4 connection",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET,
 				Type:   syscall.SOCK_STREAM,
 				Laddr: psnet.Addr{
@@ -339,7 +327,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 		},
 		{
 			name: "TCPv6 connection",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET6,
 				Type:   syscall.SOCK_STREAM,
 				Laddr: psnet.Addr{
@@ -357,7 +345,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 		},
 		{
 			name: "TCPv4 connection - 0.0.0.0",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET,
 				Type:   syscall.SOCK_STREAM,
 				Laddr: psnet.Addr{
@@ -375,7 +363,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 		},
 		{
 			name: "UDPv4 connection",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET,
 				Type:   syscall.SOCK_DGRAM,
 				Laddr: psnet.Addr{
@@ -393,7 +381,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 		},
 		{
 			name: "UDPv6 connection",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET6,
 				Type:   syscall.SOCK_DGRAM,
 				Laddr: psnet.Addr{
@@ -411,7 +399,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 		},
 		{
 			name: "Listening on all interfaces (Darwin)",
-			conn: psnet.ConnectionStat{
+			conn: &psnet.ConnectionStat{
 				Family: syscall.AF_INET,
 				Type:   syscall.SOCK_DGRAM,
 				Laddr: psnet.Addr{
@@ -430,9 +418,7 @@ func TestCollectConnectionDetails(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := collectConnectionDetails(&tt.conn); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("collectConnectionDetails() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, collectConnectionDetails(tt.conn))
 		})
 	}
 }
@@ -548,10 +534,7 @@ func TestCollectEndpoints(t *testing.T) {
 
 			require.NotNil(t, e.collectProcessDetails)
 			require.NotNil(t, e.getProcess)
-
-			if got := e.collectEndpoints(tt.conns); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("collectEndpoints() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, e.collectEndpoints(tt.conns))
 		})
 	}
 }

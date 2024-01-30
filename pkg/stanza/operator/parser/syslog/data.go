@@ -1,20 +1,10 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package syslog // import "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/parser/syslog"
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,6 +53,8 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 
 	nulFramingTrailer := NULTrailer
 
+	ts := time.Now()
+
 	var cases = []Case{
 		{
 			"RFC3164",
@@ -73,20 +65,20 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				return cfg
 			}(),
 			&entry.Entry{
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			&entry.Entry{
-				Timestamp:    time.Date(time.Now().Year(), 1, 12, 6, 30, 0, 0, location["utc"]),
+				Timestamp:    time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, location["utc"]),
 				Severity:     entry.Error2,
 				SeverityText: "crit",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "apache_server",
 					"facility": 4,
 					"hostname": "1.2.3.4",
 					"message":  "test message",
 					"priority": 34,
 				},
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			true,
 			true,
@@ -100,20 +92,20 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				return cfg
 			}(),
 			&entry.Entry{
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			&entry.Entry{
-				Timestamp:    time.Date(time.Now().Year(), 1, 12, 6, 30, 0, 0, location["detroit"]),
+				Timestamp:    time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, location["detroit"]),
 				Severity:     entry.Error2,
 				SeverityText: "crit",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "apache_server",
 					"facility": 4,
 					"hostname": "1.2.3.4",
 					"message":  "test message",
 					"priority": 34,
 				},
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			true,
 			true,
@@ -127,20 +119,20 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				return cfg
 			}(),
 			&entry.Entry{
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			&entry.Entry{
-				Timestamp:    time.Date(time.Now().Year(), 1, 12, 6, 30, 0, 0, location["athens"]),
+				Timestamp:    time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, location["athens"]),
 				Severity:     entry.Error2,
 				SeverityText: "crit",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "apache_server",
 					"facility": 4,
 					"hostname": "1.2.3.4",
 					"message":  "test message",
 					"priority": 34,
 				},
-				Body: "<34>Jan 12 06:30:00 1.2.3.4 apache_server: test message",
+				Body: fmt.Sprintf("<34>%s 1.2.3.4 apache_server: test message", ts.Format("Jan _2 15:04:05")),
 			},
 			true,
 			true,
@@ -159,7 +151,7 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				Timestamp:    time.Date(2015, 8, 5, 21, 58, 59, 693000000, time.UTC),
 				Severity:     entry.Info,
 				SeverityText: "info",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "SecureAuth0",
 					"facility": 10,
 					"hostname": "192.168.2.132",
@@ -167,8 +159,8 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 					"msg_id":   "ID52020",
 					"priority": 86,
 					"proc_id":  "23108",
-					"structured_data": map[string]map[string]string{
-						"SecureAuth@27389": {
+					"structured_data": map[string]any{
+						"SecureAuth@27389": map[string]any{
 							"PEN":             "27389",
 							"Realm":           "SecureAuth0",
 							"UserHostAddress": "192.168.2.132",
@@ -197,7 +189,7 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				Timestamp:    time.Date(2015, 8, 5, 21, 58, 59, 693000000, time.UTC),
 				Severity:     entry.Info,
 				SeverityText: "info",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "SecureAuth0",
 					"facility": 10,
 					"hostname": "192.168.2.132",
@@ -205,8 +197,8 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 					"msg_id":   "ID52020",
 					"priority": 86,
 					"proc_id":  "23108",
-					"structured_data": map[string]map[string]string{
-						"SecureAuth@27389": {
+					"structured_data": map[string]any{
+						"SecureAuth@27389": map[string]any{
 							"PEN":             "27389",
 							"Realm":           "SecureAuth0",
 							"UserHostAddress": "192.168.2.132",
@@ -235,7 +227,7 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 				Timestamp:    time.Date(2015, 8, 5, 21, 58, 59, 693000000, time.UTC),
 				Severity:     entry.Info,
 				SeverityText: "info",
-				Attributes: map[string]interface{}{
+				Attributes: map[string]any{
 					"appname":  "SecureAuth0",
 					"facility": 10,
 					"hostname": "192.168.2.132",
@@ -243,8 +235,8 @@ func CreateCases(basicConfig func() *Config) ([]Case, error) {
 					"msg_id":   "ID52020",
 					"priority": 86,
 					"proc_id":  "23108",
-					"structured_data": map[string]map[string]string{
-						"SecureAuth@27389": {
+					"structured_data": map[string]any{
+						"SecureAuth@27389": map[string]any{
 							"PEN":             "27389",
 							"Realm":           "SecureAuth0",
 							"UserHostAddress": "192.168.2.132",

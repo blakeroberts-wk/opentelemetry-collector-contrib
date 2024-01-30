@@ -1,26 +1,15 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package regex
 
 import (
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 )
 
 func TestNewMemoryCache(t *testing.T) {
@@ -34,7 +23,7 @@ func TestNewMemoryCache(t *testing.T) {
 			"size-50",
 			50,
 			&memoryCache{
-				cache: make(map[string]interface{}),
+				cache: make(map[string]any),
 				keys:  make(chan string, 50),
 			},
 			50,
@@ -54,7 +43,7 @@ func TestMemory(t *testing.T) {
 	cases := []struct {
 		name   string
 		cache  *memoryCache
-		input  map[string]interface{}
+		input  map[string]any
 		expect *memoryCache
 	}{
 		{
@@ -62,7 +51,7 @@ func TestMemory(t *testing.T) {
 			func() *memoryCache {
 				return newMemoryCache(3, 0)
 			}(),
-			map[string]interface{}{
+			map[string]any{
 				"key": "value",
 				"map-value": map[string]string{
 					"x":   "y",
@@ -70,7 +59,7 @@ func TestMemory(t *testing.T) {
 				},
 			},
 			&memoryCache{
-				cache: map[string]interface{}{
+				cache: map[string]any{
 					"key": "value",
 					"map-value": map[string]string{
 						"x":   "y",
@@ -114,7 +103,7 @@ func TestCleanupLast(t *testing.T) {
 	}
 
 	// make sure the cache looks the way we expect
-	expectCache := map[string]interface{}{
+	expectCache := map[string]any{
 		"1":  1, // oldest key, will be removed when 11 is added
 		"2":  2,
 		"3":  3,
@@ -143,7 +132,7 @@ func TestCleanupLast(t *testing.T) {
 	}
 
 	// All entries should have been replaced by now
-	expectCache = map[string]interface{}{
+	expectCache = map[string]any{
 		"11": 11,
 		"12": 12,
 		"13": 13,
@@ -224,9 +213,11 @@ func TestThrottledLimiter(t *testing.T) {
 	// Limiter with a count higher than the max, which will force
 	// it to be throttled by default. Also note that the init method
 	// has not been called yet, so the reset go routine is not running
+	count := &atomic.Uint64{}
+	count.Add(max + 1)
 	l := atomicLimiter{
 		max:      max,
-		count:    atomic.NewUint64(max + 1),
+		count:    count,
 		interval: 1,
 	}
 

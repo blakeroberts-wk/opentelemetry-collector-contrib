@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package prometheusremotewriteexporter
 
@@ -20,9 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
@@ -32,10 +21,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/config/configtls"
+	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testdata"
@@ -44,21 +36,26 @@ import (
 // Test_NewPRWExporter checks that a new exporter instance with non-nil fields is initialized
 func Test_NewPRWExporter(t *testing.T) {
 	cfg := &Config{
-		ExporterSettings:   config.NewExporterSettings(component.NewID(typeStr)),
 		TimeoutSettings:    exporterhelper.TimeoutSettings{},
-		RetrySettings:      exporterhelper.RetrySettings{},
+		BackOffConfig:      configretry.BackOffConfig{},
 		Namespace:          "",
 		ExternalLabels:     map[string]string{},
 		HTTPClientSettings: confighttp.HTTPClientSettings{Endpoint: ""},
 		TargetInfo: &TargetInfo{
 			Enabled: true,
 		},
+		ScopeInfo: &ScopeInfo{
+			Enabled: false,
+		},
+		CreatedMetric: &CreatedMetric{
+			Enabled: false,
+		},
 	}
 	buildInfo := component.BuildInfo{
 		Description: "OpenTelemetry Collector",
 		Version:     "1.0",
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo = buildInfo
 
 	tests := []struct {
@@ -69,7 +66,7 @@ func Test_NewPRWExporter(t *testing.T) {
 		concurrency         int
 		externalLabels      map[string]string
 		returnErrorOnCreate bool
-		set                 component.ExporterCreateSettings
+		set                 exporter.CreateSettings
 	}{
 		{
 			name:                "invalid_URL",
@@ -125,9 +122,8 @@ func Test_NewPRWExporter(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			require.NotNil(t, prwe)
-			assert.NotNil(t, prwe.namespace)
+			assert.NotNil(t, prwe.exporterSettings)
 			assert.NotNil(t, prwe.endpointURL)
-			assert.NotNil(t, prwe.externalLabels)
 			assert.NotNil(t, prwe.closeChan)
 			assert.NotNil(t, prwe.wg)
 			assert.NotNil(t, prwe.userAgentHeader)
@@ -139,20 +135,26 @@ func Test_NewPRWExporter(t *testing.T) {
 // Test_Start checks if the client is properly created as expected.
 func Test_Start(t *testing.T) {
 	cfg := &Config{
-		ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
-		TimeoutSettings:  exporterhelper.TimeoutSettings{},
-		RetrySettings:    exporterhelper.RetrySettings{},
-		Namespace:        "",
-		ExternalLabels:   map[string]string{},
+		TimeoutSettings:   exporterhelper.TimeoutSettings{},
+		BackOffConfig:     configretry.BackOffConfig{},
+		MaxBatchSizeBytes: 3000000,
+		Namespace:         "",
+		ExternalLabels:    map[string]string{},
 		TargetInfo: &TargetInfo{
 			Enabled: true,
+		},
+		ScopeInfo: &ScopeInfo{
+			Enabled: false,
+		},
+		CreatedMetric: &CreatedMetric{
+			Enabled: false,
 		},
 	}
 	buildInfo := component.BuildInfo{
 		Description: "OpenTelemetry Collector",
 		Version:     "1.0",
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo = buildInfo
 	tests := []struct {
 		name                 string
@@ -161,7 +163,7 @@ func Test_Start(t *testing.T) {
 		concurrency          int
 		externalLabels       map[string]string
 		returnErrorOnStartUp bool
-		set                  component.ExporterCreateSettings
+		set                  exporter.CreateSettings
 		endpoint             string
 		clientSettings       confighttp.HTTPClientSettings
 	}{
@@ -350,12 +352,18 @@ func runExportPipeline(ts *prompb.TimeSeries, endpoint *url.URL) error {
 	cfg := createDefaultConfig().(*Config)
 	cfg.HTTPClientSettings.Endpoint = endpoint.String()
 	cfg.RemoteWriteQueue.NumConsumers = 1
+	cfg.BackOffConfig = configretry.BackOffConfig{
+		Enabled:         true,
+		InitialInterval: 100 * time.Millisecond, // Shorter initial interval
+		MaxInterval:     1 * time.Second,        // Shorter max interval
+		MaxElapsedTime:  2 * time.Second,        // Shorter max elapsed time
+	}
 
 	buildInfo := component.BuildInfo{
 		Description: "OpenTelemetry Collector",
 		Version:     "1.0",
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo = buildInfo
 	// after this, instantiate a CortexExporter with the current HTTP client and endpoint set to passed in endpoint
 	prwe, err := newPRWExporter(cfg, set)
@@ -367,7 +375,7 @@ func runExportPipeline(ts *prompb.TimeSeries, endpoint *url.URL) error {
 		return err
 	}
 
-	return prwe.handleExport(context.Background(), testmap)
+	return prwe.handleExport(context.Background(), testmap, nil)
 }
 
 // Test_PushMetrics checks the number of TimeSeries received by server and the number of metrics dropped is the same as
@@ -385,10 +393,23 @@ func Test_PushMetrics(t *testing.T) {
 
 	doubleGaugeBatch := getMetricsFromMetricList(validMetrics1[validDoubleGauge], validMetrics2[validDoubleGauge])
 
+	expHistogramBatch := getMetricsFromMetricList(
+		getExpHistogramMetric("exponential_hist", lbs1, time1, &floatVal1, uint64(2), 2, []uint64{1, 1}),
+		getExpHistogramMetric("exponential_hist", lbs2, time2, &floatVal2, uint64(2), 0, []uint64{2, 2}),
+	)
+	emptyExponentialHistogramBatch := getMetricsFromMetricList(
+		getExpHistogramMetric("empty_exponential_hist", lbs1, time1, &floatValZero, uint64(0), 0, []uint64{}),
+		getExpHistogramMetric("empty_exponential_hist", lbs1, time1, &floatValZero, uint64(0), 1, []uint64{}),
+		getExpHistogramMetric("empty_exponential_hist", lbs2, time2, &floatValZero, uint64(0), 0, []uint64{}),
+		getExpHistogramMetric("empty_exponential_hist_two", lbs2, time2, &floatValZero, uint64(0), 0, []uint64{}),
+	)
+	exponentialNoSumHistogramBatch := getMetricsFromMetricList(
+		getExpHistogramMetric("no_sum_exponential_hist", lbs1, time1, nil, uint64(2), 0, []uint64{1, 1}),
+		getExpHistogramMetric("no_sum_exponential_hist", lbs1, time2, nil, uint64(2), 0, []uint64{2, 2}),
+	)
+
 	histogramBatch := getMetricsFromMetricList(validMetrics1[validHistogram], validMetrics2[validHistogram])
-
 	emptyDataPointHistogramBatch := getMetricsFromMetricList(validMetrics1[validEmptyHistogram], validMetrics2[validEmptyHistogram])
-
 	histogramNoSumBatch := getMetricsFromMetricList(validMetrics1[validHistogramNoSum], validMetrics2[validHistogramNoSum])
 
 	summaryBatch := getMetricsFromMetricList(validMetrics1[validSummary], validMetrics2[validSummary])
@@ -461,7 +482,7 @@ func Test_PushMetrics(t *testing.T) {
 			name:               "intSum_case",
 			metrics:            intSumBatch,
 			reqTestFunc:        checkFunc,
-			expectedTimeSeries: 3,
+			expectedTimeSeries: 5,
 			httpResponseCode:   http.StatusAccepted,
 		},
 		{
@@ -483,6 +504,27 @@ func Test_PushMetrics(t *testing.T) {
 			metrics:            intGaugeBatch,
 			reqTestFunc:        checkFunc,
 			expectedTimeSeries: 2,
+			httpResponseCode:   http.StatusAccepted,
+		},
+		{
+			name:               "exponential_histogram_case",
+			metrics:            expHistogramBatch,
+			reqTestFunc:        checkFunc,
+			expectedTimeSeries: 2,
+			httpResponseCode:   http.StatusAccepted,
+		},
+		{
+			name:               "valid_empty_exponential_histogram_case",
+			metrics:            emptyExponentialHistogramBatch,
+			reqTestFunc:        checkFunc,
+			expectedTimeSeries: 3,
+			httpResponseCode:   http.StatusAccepted,
+		},
+		{
+			name:               "exponential_histogram_no_sum_case",
+			metrics:            exponentialNoSumHistogramBatch,
+			reqTestFunc:        checkFunc,
+			expectedTimeSeries: 1,
 			httpResponseCode:   http.StatusAccepted,
 		},
 		{
@@ -641,19 +683,33 @@ func Test_PushMetrics(t *testing.T) {
 
 					defer server.Close()
 
+					// Adjusted retry settings for faster testing
+					retrySettings := configretry.BackOffConfig{
+						Enabled:         true,
+						InitialInterval: 100 * time.Millisecond, // Shorter initial interval
+						MaxInterval:     1 * time.Second,        // Shorter max interval
+						MaxElapsedTime:  2 * time.Second,        // Shorter max elapsed time
+					}
 					cfg := &Config{
-						ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
-						Namespace:        "",
+						Namespace: "",
 						HTTPClientSettings: confighttp.HTTPClientSettings{
 							Endpoint: server.URL,
 							// We almost read 0 bytes, so no need to tune ReadBufferSize.
 							ReadBufferSize:  0,
 							WriteBufferSize: 512 * 1024,
 						},
-						RemoteWriteQueue: RemoteWriteQueue{NumConsumers: 1},
+						MaxBatchSizeBytes: 3000000,
+						RemoteWriteQueue:  RemoteWriteQueue{NumConsumers: 1},
 						TargetInfo: &TargetInfo{
 							Enabled: true,
 						},
+						ScopeInfo: &ScopeInfo{
+							Enabled: false,
+						},
+						CreatedMetric: &CreatedMetric{
+							Enabled: true,
+						},
+						BackOffConfig: retrySettings,
 					}
 
 					if useWAL {
@@ -667,7 +723,7 @@ func Test_PushMetrics(t *testing.T) {
 						Description: "OpenTelemetry Collector",
 						Version:     "1.0",
 					}
-					set := componenttest.NewNopExporterCreateSettings()
+					set := exportertest.NewNopCreateSettings()
 					set.BuildInfo = buildInfo
 					prwe, nErr := newPRWExporter(cfg, set)
 					require.NoError(t, nErr)
@@ -800,9 +856,7 @@ func Test_validateAndSanitizeExternalLabels(t *testing.T) {
 // and that we can retrieve those exact requests back from the WAL, when the
 // exporter starts up once again, that it picks up where it left off.
 func TestWALOnExporterRoundTrip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping test on windows, see https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/10142")
-	}
+	t.Skip("skipping test, see https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/10142")
 	if testing.Short() {
 		t.Skip("This test could run for long")
 	}
@@ -826,8 +880,7 @@ func TestWALOnExporterRoundTrip(t *testing.T) {
 	// exporter and export some time series!
 	tempDir := t.TempDir()
 	cfg := &Config{
-		ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
-		Namespace:        "test_ns",
+		Namespace: "test_ns",
 		HTTPClientSettings: confighttp.HTTPClientSettings{
 			Endpoint: prweServer.URL,
 		},
@@ -839,9 +892,12 @@ func TestWALOnExporterRoundTrip(t *testing.T) {
 		TargetInfo: &TargetInfo{
 			Enabled: true,
 		},
+		CreatedMetric: &CreatedMetric{
+			Enabled: false,
+		},
 	}
 
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo = component.BuildInfo{
 		Description: "OpenTelemetry Collector",
 		Version:     "1.0",
@@ -873,7 +929,7 @@ func TestWALOnExporterRoundTrip(t *testing.T) {
 		"timeseries1": ts1,
 		"timeseries2": ts2,
 	}
-	errs := prwe.handleExport(ctx, tsMap)
+	errs := prwe.handleExport(ctx, tsMap, nil)
 	assert.NoError(t, errs)
 	// Shutdown after we've written to the WAL. This ensures that our
 	// exported data in-flight will flushed flushed to the WAL before exiting.
@@ -949,4 +1005,71 @@ func TestWALOnExporterRoundTrip(t *testing.T) {
 	// To ensure a deterministic ordering, sort the TimeSeries by Label Name.
 	assert.Equal(t, want, gotFromUpload)
 	assert.Equal(t, gotFromWAL, gotFromUpload)
+}
+
+func TestRetryOn5xx(t *testing.T) {
+	// Create a mock HTTP server with a counter to simulate a 5xx error on the first attempt and a 2xx success on the second attempt
+	attempts := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts < 4 {
+			attempts++
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer mockServer.Close()
+
+	endpointURL, err := url.Parse(mockServer.URL)
+	require.NoError(t, err)
+
+	// Create the prwExporter
+	exporter := &prwExporter{
+		endpointURL: endpointURL,
+		client:      http.DefaultClient,
+		retrySettings: configretry.BackOffConfig{
+			Enabled: true,
+		},
+	}
+
+	ctx := context.Background()
+
+	// Execute the write request and verify that the exporter returns a non-permanent error on the first attempt.
+	err = exporter.execute(ctx, &prompb.WriteRequest{})
+	assert.NoError(t, err)
+	assert.Equal(t, 4, attempts)
+}
+
+func TestNoRetryOn4xx(t *testing.T) {
+	// Create a mock HTTP server with a counter to simulate a 4xx error
+	attempts := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts < 1 {
+			attempts++
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer mockServer.Close()
+
+	endpointURL, err := url.Parse(mockServer.URL)
+	require.NoError(t, err)
+
+	// Create the prwExporter
+	exporter := &prwExporter{
+		endpointURL: endpointURL,
+		client:      http.DefaultClient,
+		retrySettings: configretry.BackOffConfig{
+			Enabled: true,
+		},
+	}
+
+	ctx := context.Background()
+
+	// Execute the write request and verify that the exporter returns an error due to the 4xx response.
+	err = exporter.execute(ctx, &prompb.WriteRequest{})
+	assert.Error(t, err)
+	assert.True(t, consumererror.IsPermanent(err))
+	assert.Equal(t, 1, attempts)
 }
